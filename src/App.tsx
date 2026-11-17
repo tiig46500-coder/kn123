@@ -5,7 +5,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { BootstrapData, Product } from './types/domain';
-import { getPublicSeedBootstrap } from './data/seedData';
+import {
+  getEffectivePublicBootstrap,
+  hasLocalWebOverrides,
+} from './utils/localWebStore';
 import { Navbar } from './components/Navbar';
 import { Footer } from './components/Footer';
 import { HomePage } from './pages/HomePage';
@@ -31,27 +34,44 @@ export default function App() {
   const [currentPath, setCurrentPath] = useState<string>(() =>
     normalizePath(window.location.pathname),
   );
-  const [data, setData] = useState<BootstrapData>(() => getPublicSeedBootstrap());
+  const [data, setData] = useState<BootstrapData>(() =>
+    getEffectivePublicBootstrap(),
+  );
   const [directProduct, setDirectProduct] = useState<Product | null>(null);
 
   const loadBootstrap = useCallback(async () => {
+    const localOverride = hasLocalWebOverrides();
+    if (localOverride) {
+      setData(getEffectivePublicBootstrap());
+    }
     try {
       const res = await fetch('/api/bootstrap', {
         headers: { Accept: 'application/json' },
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        setData(getEffectivePublicBootstrap());
+        return;
+      }
       const contentType = res.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) return;
+      if (!contentType.includes('application/json')) {
+        setData(getEffectivePublicBootstrap());
+        return;
+      }
       const payload = (await res.json()) as BootstrapData;
       if (
         payload &&
         Array.isArray(payload.categories) &&
         Array.isArray(payload.products)
       ) {
-        setData(payload);
+        // If user saved edits directly in browser (no-DB mode), preserve them
+        // unless a persistent server override is explicitly synced.
+        if (!localOverride) {
+          setData(payload);
+        }
       }
     } catch {
-      // Static-only or offline fallback remains active via getPublicSeedBootstrap()
+      // Static-only or offline fallback remains active via localWebStore / seedData
+      setData(getEffectivePublicBootstrap());
     }
   }, []);
 

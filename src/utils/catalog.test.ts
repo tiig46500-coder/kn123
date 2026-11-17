@@ -15,6 +15,11 @@ import {
   wrapGalleryIndex,
 } from './catalog';
 import { getFullSeedBootstrap, getPublicSeedBootstrap } from '../data/seedData';
+import {
+  filterPublicBootstrap,
+  getEffectivePublicBootstrap,
+  getLocalAdminOverview,
+} from './localWebStore';
 import type { Product } from '../types/domain';
 
 const makeProduct = (overrides: Partial<Product>): Product => ({
@@ -223,5 +228,20 @@ test('all seed and component image references resolve to non-empty files inside 
     assert.ok(stat.size > 0, `Image file is empty: ${fullPath}`);
   }
 });
+
+test('database-free web store fallback preserves all seed content and active filters', () => {
+  const effective = getEffectivePublicBootstrap();
+  const overview = getLocalAdminOverview();
+  const filtered = filterPublicBootstrap(overview);
+
+  assert.equal(effective.products.length, 14);
+  assert.equal(overview.products.length, 17);
+  assert.equal(filtered.products.length, 14);
+  assert.equal(effective.gallery.length, 24);
+  assert.equal(effective.articles.length, 3);
+  assert.equal(effective.processSteps.length, 7);
+  assert.equal(effective.banners.length, 2);
+});
+
 
 

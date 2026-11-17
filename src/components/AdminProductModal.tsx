@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import type { Category, Product } from '../types/domain';
 import { reorderArray } from '../utils/catalog';
+import { filesToPersistedDataUrls, localWebStore } from '../utils/localWebStore';
 import { SafeImage } from './SafeImage';
 
 export interface EditableImage {
@@ -23,6 +24,7 @@ export interface EditableImage {
 interface AdminProductModalProps {
   product: Product | null; // null = create new
   categories: Category[];
+  browserOnlyMode?: boolean;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }
@@ -30,6 +32,7 @@ interface AdminProductModalProps {
 export function AdminProductModal({
   product,
   categories,
+  browserOnlyMode = false,
   onClose,
   onSaved,
 }: AdminProductModalProps) {
@@ -100,6 +103,21 @@ export function AdminProductModal({
     setError('');
     setUploading(true);
     try {
+      if (browserOnlyMode) {
+        const urls = await filesToPersistedDataUrls(files);
+        setImages((prev) => {
+          const hasCover = prev.some((i) => i.is_cover === 1);
+          const added: EditableImage[] = urls.map((url, idx) => ({
+            image_url: url,
+            alt_text: name.trim() || 'Sản phẩm Lạng Xanh',
+            caption: '',
+            is_cover: !hasCover && idx === 0 ? 1 : 0,
+          }));
+          return [...prev, ...added];
+        });
+        return;
+      }
+
       const formData = new FormData();
       Array.from(files).forEach((file) => formData.append('images', file));
       const res = await fetch('/api/admin/upload', {
@@ -128,7 +146,7 @@ export function AdminProductModal({
         return [...prev, ...added];
       });
     } catch {
-      setError('Không thể kết nối máy chủ để tải ảnh lên.');
+      setError('Không thể xử lý tệp ảnh đã chọn.');
     } finally {
       setUploading(false);
     }
@@ -191,6 +209,18 @@ export function AdminProductModal({
           is_cover: img.is_cover,
         })),
       };
+
+      if (browserOnlyMode) {
+        if (product) {
+          localWebStore.updateProduct(product.id, payload);
+          localWebStore.replaceProductImages(product.id, payload.images);
+        } else {
+          localWebStore.createProduct(payload);
+        }
+        await onSaved();
+        onClose();
+        return;
+      }
 
       if (product) {
         const res = await fetch(`/api/admin/products/${product.id}`, {

@@ -177,6 +177,14 @@ function saveJsonStore(state: JsonStoreState) {
 function ensureStoreReady() {
   if (initialized) return;
   initialized = true;
+  if (
+    process.env.NO_DATABASE === 'true' ||
+    process.env.USE_DATABASE === 'false'
+  ) {
+    sqliteDb = null;
+    jsonState = initJsonFallback();
+    return;
+  }
   try {
     sqliteDb = openSqliteDatabase();
   } catch (err) {

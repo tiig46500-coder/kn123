@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   AlertTriangle,
   Check,
+  Download,
   Edit3,
   Eye,
   EyeOff,
@@ -14,11 +15,13 @@ import {
   LogOut,
   Package,
   Plus,
+  RotateCcw,
   Settings,
   Sparkles,
   Sprout,
   Star,
   Trash2,
+  Upload,
   Workflow,
 } from 'lucide-react';
 import type {
@@ -32,6 +35,19 @@ import type {
   WorkshopInfo,
 } from '../types/domain';
 import { formatPriceVND, getCoverImageUrl } from '../utils/catalog';
+import {
+  changeLocalAdminPassword,
+  clearLocalAdminSession,
+  filesToPersistedDataUrls,
+  getLocalAdminOverview,
+  getLocalAdminSession,
+  hasLocalWebOverrides,
+  importLocalWebStoreJson,
+  localWebStore,
+  resetLocalWebStore,
+  saveSnapshotToLocalWebStore,
+  verifyLocalAdminLogin,
+} from '../utils/localWebStore';
 import { AdminProductModal } from '../components/AdminProductModal';
 import { SafeImage } from '../components/SafeImage';
 
@@ -78,7 +94,10 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [authenticated, setAuthenticated] = useState(false);
   const [adminUsername, setAdminUsername] = useState('');
-  const [storageMode, setStorageMode] = useState<'cloudinary' | 'supabase' | 'local' | 'ephemeral'>('local');
+  const [storageMode, setStorageMode] = useState<
+    'cloudinary' | 'supabase' | 'local' | 'ephemeral' | 'browser'
+  >('local');
+  const browserOnlyMode = storageMode === 'browser';
 
   // Login form state
   const [loginUser, setLoginUser] = useState('');
@@ -128,10 +147,8 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
     setTimeout(() => setToast(''), 3000);
   };
 
-  const loadAdminData = useCallback(async () => {
-    const res = await fetch('/api/admin/overview');
-    if (!res.ok) return;
-    const data = await safeParseJson<{
+  const applyOverviewState = useCallback(
+    (data: {
       categories: Category[];
       products: Product[];
       gallery: GalleryItem[];
@@ -140,17 +157,47 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
       banners: Banner[];
       settings: SiteSettings | null;
       workshop: WorkshopInfo | null;
-    }>(res);
-    if (!data) return;
-    setCategories(data.categories);
-    setProducts(data.products);
-    setGallery(data.gallery);
-    setArticles(data.articles);
-    setProcessSteps(data.processSteps);
-    setBanners(data.banners);
-    setSettings(data.settings);
-    setWorkshop(data.workshop);
-  }, []);
+    }) => {
+      setCategories(data.categories);
+      setProducts(data.products);
+      setGallery(data.gallery);
+      setArticles(data.articles);
+      setProcessSteps(data.processSteps);
+      setBanners(data.banners);
+      setSettings(data.settings);
+      setWorkshop(data.workshop);
+    },
+    [],
+  );
+
+  const loadAdminData = useCallback(
+    async (modeOverride?: string) => {
+      const effectiveMode = modeOverride ?? storageMode;
+      if (effectiveMode === 'browser') {
+        applyOverviewState(getLocalAdminOverview());
+        return;
+      }
+      if (effectiveMode === 'ephemeral' && hasLocalWebOverrides()) {
+        applyOverviewState(getLocalAdminOverview());
+        return;
+      }
+      const res = await fetch('/api/admin/overview');
+      if (!res.ok) return;
+      const data = await safeParseJson<{
+        categories: Category[];
+        products: Product[];
+        gallery: GalleryItem[];
+        articles: Article[];
+        processSteps: ProcessStep[];
+        banners: Banner[];
+        settings: SiteSettings | null;
+        workshop: WorkshopInfo | null;
+      }>(res);
+      if (!data) return;
+      applyOverviewState(data);
+    },
+    [applyOverviewState, storageMode],
+  );
 
   useEffect(() => {
     fetch('/api/admin/me')
@@ -160,17 +207,33 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
           username?: string;
           storageMode?: 'cloudinary' | 'supabase' | 'local' | 'ephemeral';
         }>(res);
-        if (d?.storageMode) {
+        if (!d) {
+          setStorageMode('browser');
+          const localSess = getLocalAdminSession();
+          if (localSess.authenticated) {
+            setAuthenticated(true);
+            setAdminUsername(localSess.username);
+            await loadAdminData('browser');
+          }
+          return;
+        }
+        if (d.storageMode) {
           setStorageMode(d.storageMode);
         }
-        if (res.ok && d?.authenticated) {
+        if (res.ok && d.authenticated) {
           setAuthenticated(true);
           setAdminUsername(d.username || '');
-          await loadAdminData();
+          await loadAdminData(d.storageMode);
         }
       })
-      .catch(() => {
-        // API unavailable
+      .catch(async () => {
+        setStorageMode('browser');
+        const localSess = getLocalAdminSession();
+        if (localSess.authenticated) {
+          setAuthenticated(true);
+          setAdminUsername(localSess.username);
+          await loadAdminData('browser');
+        }
       })
       .finally(() => setCheckingAuth(false));
   }, [loadAdminData]);
@@ -180,6 +243,18 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
     setLoginError('');
     setLoginBusy(true);
     try {
+      if (browserOnlyMode) {
+        if (!verifyLocalAdminLogin(loginUser, loginPass)) {
+          setLoginError('Tài khoản hoặc mật khẩu không chính xác.');
+          return;
+        }
+        setAuthenticated(true);
+        setAdminUsername(loginUser.trim());
+        setLoginPass('');
+        await loadAdminData('browser');
+        return;
+      }
+
       const res = await fetch('/api/admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -192,7 +267,15 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
         error?: string;
       }>(res);
       if (!data) {
-        setLoginError('Máy chủ API quản trị chưa sẵn sàng trên môi trường hiện tại.');
+        setStorageMode('browser');
+        if (!verifyLocalAdminLogin(loginUser, loginPass)) {
+          setLoginError('Tài khoản hoặc mật khẩu không chính xác.');
+          return;
+        }
+        setAuthenticated(true);
+        setAdminUsername(loginUser.trim());
+        setLoginPass('');
+        await loadAdminData('browser');
         return;
       }
       if (!res.ok) {
@@ -205,22 +288,57 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
       setAuthenticated(true);
       setAdminUsername(data.username || loginUser);
       setLoginPass('');
-      await loadAdminData();
+      await loadAdminData(data.storageMode);
     } catch {
-      setLoginError('Không thể kết nối máy chủ.');
+      setStorageMode('browser');
+      if (verifyLocalAdminLogin(loginUser, loginPass)) {
+        setAuthenticated(true);
+        setAdminUsername(loginUser.trim());
+        setLoginPass('');
+        await loadAdminData('browser');
+      } else {
+        setLoginError('Tài khoản hoặc mật khẩu không chính xác.');
+      }
     } finally {
       setLoginBusy(false);
     }
   };
 
   const handleLogout = async () => {
-    await fetch('/api/admin/logout', { method: 'POST' });
+    clearLocalAdminSession();
+    if (!browserOnlyMode) {
+      await fetch('/api/admin/logout', { method: 'POST' }).catch(() => {});
+    }
     setAuthenticated(false);
     setAdminUsername('');
   };
 
   const refreshAll = async () => {
-    await Promise.all([loadAdminData(), onPublicRefresh()]);
+    if (browserOnlyMode) {
+      applyOverviewState(getLocalAdminOverview());
+      await onPublicRefresh();
+      return;
+    }
+    await loadAdminData();
+    if (storageMode === 'ephemeral') {
+      const res = await fetch('/api/admin/overview').catch(() => null);
+      if (res && res.ok) {
+        const snapshot = await safeParseJson<{
+          categories: Category[];
+          products: Product[];
+          gallery: GalleryItem[];
+          articles: Article[];
+          processSteps: ProcessStep[];
+          banners: Banner[];
+          settings: SiteSettings | null;
+          workshop: WorkshopInfo | null;
+        }>(res);
+        if (snapshot) {
+          saveSnapshotToLocalWebStore(snapshot);
+        }
+      }
+    }
+    await onPublicRefresh();
   };
 
   const toggleProductField = async (
@@ -228,17 +346,31 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
     field: 'is_active' | 'featured',
   ) => {
     const nextVal = p[field] ? 0 : 1;
-    await fetch(`/api/admin/products/${p.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ [field]: nextVal }),
-    });
+    if (browserOnlyMode) {
+      localWebStore.updateProduct(p.id, { [field]: nextVal });
+    } else {
+      if (storageMode === 'ephemeral') {
+        localWebStore.updateProduct(p.id, { [field]: nextVal });
+      }
+      await fetch(`/api/admin/products/${p.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [field]: nextVal }),
+      });
+    }
     await refreshAll();
     notify('Đã cập nhật trạng thái sản phẩm.');
   };
 
   const handleDeleteProduct = async (p: Product) => {
-    await fetch(`/api/admin/products/${p.id}`, { method: 'DELETE' });
+    if (browserOnlyMode) {
+      localWebStore.deleteProduct(p.id);
+    } else {
+      if (storageMode === 'ephemeral') {
+        localWebStore.deleteProduct(p.id);
+      }
+      await fetch(`/api/admin/products/${p.id}`, { method: 'DELETE' });
+    }
     setConfirmDelete(null);
     await refreshAll();
     notify(`Đã xóa sản phẩm "${p.name}".`);
@@ -252,25 +384,45 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
     }
     setGalUploading(true);
     try {
-      const fd = new FormData();
-      Array.from(files).forEach((f) => fd.append('images', f));
-      const up = await fetch('/api/admin/upload', { method: 'POST', body: fd });
-      const upData = await safeParseJson<{ urls?: string[]; error?: string }>(up);
-      if (!up.ok) {
-        notify(upData?.error || 'Tải ảnh lên thất bại.');
-        return;
-      }
-      for (const url of upData?.urls ?? []) {
-        await fetch('/api/admin/gallery', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+      if (browserOnlyMode) {
+        const urls = await filesToPersistedDataUrls(files);
+        for (const url of urls) {
+          localWebStore.createGalleryItem({
             album: galAlbum,
             title: galTitle.trim(),
             caption: galCaption.trim(),
             image_url: url,
-          }),
-        });
+          });
+        }
+      } else {
+        const fd = new FormData();
+        Array.from(files).forEach((f) => fd.append('images', f));
+        const up = await fetch('/api/admin/upload', { method: 'POST', body: fd });
+        const upData = await safeParseJson<{ urls?: string[]; error?: string }>(up);
+        if (!up.ok) {
+          notify(upData?.error || 'Tải ảnh lên thất bại.');
+          return;
+        }
+        for (const url of upData?.urls ?? []) {
+          if (storageMode === 'ephemeral') {
+            localWebStore.createGalleryItem({
+              album: galAlbum,
+              title: galTitle.trim(),
+              caption: galCaption.trim(),
+              image_url: url,
+            });
+          }
+          await fetch('/api/admin/gallery', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              album: galAlbum,
+              title: galTitle.trim(),
+              caption: galCaption.trim(),
+              image_url: url,
+            }),
+          });
+        }
       }
       setGalTitle('');
       setGalCaption('');
@@ -452,18 +604,18 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
 
         {/* Main Panel */}
         <div className="flex-1 min-w-0 space-y-6">
-          {storageMode === 'ephemeral' && (
+          {(storageMode === 'ephemeral' || storageMode === 'browser') && (
             <div
               role="note"
-              className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3 text-xs text-amber-900 leading-relaxed"
+              className="bg-[#E9DFC9]/60 border border-[#244B35]/15 rounded-2xl p-4 flex items-start gap-3 text-xs text-[#1E2E23] leading-relaxed"
             >
-              <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+              <AlertTriangle className="w-4 h-4 text-[#244B35] shrink-0 mt-0.5" />
               <div className="space-y-1">
-                <p className="font-semibold">
-                  Lưu ý lưu trữ trên môi trường Vercel Serverless (chế độ tạm thời)
+                <p className="font-semibold text-[#244B35]">
+                  Chế độ lưu trữ trực tiếp trên hệ thống web (không cần cơ sở dữ liệu)
                 </p>
                 <p>
-                  Toàn bộ dữ liệu công khai và bộ ảnh dự án trong mã nguồn luôn hiển thị ổn định trên Vercel. Tuy nhiên, các ảnh và chỉnh sửa mới tạo qua trang quản trị hiện chỉ lưu tạm trong phiên serverless; để lưu ảnh lâu dài khi vận hành thực tế, quản trị viên cần cấu hình biến môi trường Cloudinary hoặc Supabase Storage trên Vercel.
+                  Toàn bộ ảnh và nội dung mặc định đã được lưu sẵn trong mã nguồn web. Mọi chỉnh sửa mới tại trang quản trị được lưu tự động vào bộ nhớ trình duyệt; bạn có thể tải file sao lưu JSON bên dưới để lưu trữ hoặc khôi phục bất kỳ lúc nào.
                 </p>
               </div>
             </div>
@@ -529,6 +681,92 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
                   >
                     Xem website công khai
                   </button>
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-2xl border border-[#244B35]/10 space-y-4">
+                <div>
+                  <h2 className="font-display text-2xl font-bold text-[#244B35]">
+                    Sao lưu & Dữ liệu hệ thống web
+                  </h2>
+                  <p className="text-sm text-[#4A5A4E]">
+                    Xuất toàn bộ sản phẩm, ảnh, bài viết và cài đặt thành tệp JSON, hoặc khôi phục lại dữ liệu gốc tích hợp sẵn trong web.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const json = JSON.stringify(
+                        {
+                          categories,
+                          products,
+                          gallery,
+                          articles,
+                          processSteps,
+                          banners,
+                          settings,
+                          workshop,
+                        },
+                        null,
+                        2,
+                      );
+                      const blob = new Blob([json], { type: 'application/json' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `langxanh-web-data-${new Date().toISOString().slice(0, 10)}.json`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                      notify('Đã tải xuống tệp sao lưu dữ liệu web.');
+                    }}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#244B35] text-white text-xs font-semibold cursor-pointer"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Tải tệp sao lưu (.json)</span>
+                  </button>
+
+                  <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-[#244B35]/25 text-[#244B35] text-xs font-semibold cursor-pointer hover:bg-[#F7F4EA]">
+                    <Upload className="w-4 h-4" />
+                    <span>Nhập từ tệp sao lưu (.json)</span>
+                    <input
+                      type="file"
+                      accept="application/json,.json"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const text = await file.text();
+                        const res = importLocalWebStoreJson(text);
+                        if (!res.ok) {
+                          notify(res.error || 'Không thể nhập dữ liệu.');
+                          return;
+                        }
+                        if (!browserOnlyMode) {
+                          setStorageMode('browser');
+                        }
+                        await loadAdminData('browser');
+                        await onPublicRefresh();
+                        notify('Đã nhập dữ liệu vào hệ thống web.');
+                        e.target.value = '';
+                      }}
+                      className="sr-only"
+                    />
+                  </label>
+
+                  {hasLocalWebOverrides() && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        resetLocalWebStore();
+                        await refreshAll();
+                        notify('Đã khôi phục dữ liệu mặc định ban đầu.');
+                      }}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-[#8A684B]/30 text-[#8A684B] text-xs font-semibold cursor-pointer hover:bg-[#F7F4EA]"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                      <span>Khôi phục dữ liệu gốc</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -685,11 +923,18 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
                       type="text"
                       defaultValue={cat.name}
                       onBlur={async (e) => {
-                        await fetch(`/api/admin/categories/${cat.id}`, {
-                          method: 'PUT',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ ...cat, name: e.target.value }),
-                        });
+                        if (browserOnlyMode) {
+                          localWebStore.updateCategory(cat.id, {
+                            ...cat,
+                            name: e.target.value,
+                          });
+                        } else {
+                          await fetch(`/api/admin/categories/${cat.id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ ...cat, name: e.target.value }),
+                          });
+                        }
                         await refreshAll();
                         notify('Đã cập nhật danh mục.');
                       }}
@@ -700,11 +945,18 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
                       rows={2}
                       defaultValue={cat.description}
                       onBlur={async (e) => {
-                        await fetch(`/api/admin/categories/${cat.id}`, {
-                          method: 'PUT',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ ...cat, description: e.target.value }),
-                        });
+                        if (browserOnlyMode) {
+                          localWebStore.updateCategory(cat.id, {
+                            ...cat,
+                            description: e.target.value,
+                          });
+                        } else {
+                          await fetch(`/api/admin/categories/${cat.id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ ...cat, description: e.target.value }),
+                          });
+                        }
                         await refreshAll();
                         notify('Đã cập nhật mô tả danh mục.');
                       }}
@@ -791,9 +1043,13 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
                       <button
                         type="button"
                         onClick={async () => {
-                          await fetch(`/api/admin/gallery/${g.id}`, {
-                            method: 'DELETE',
-                          });
+                          if (browserOnlyMode) {
+                            localWebStore.deleteGalleryItem(g.id);
+                          } else {
+                            await fetch(`/api/admin/gallery/${g.id}`, {
+                              method: 'DELETE',
+                            });
+                          }
                           await refreshAll();
                           notify('Đã xóa ảnh khỏi thư viện.');
                         }}
@@ -832,11 +1088,15 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
                         type="text"
                         defaultValue={b.title}
                         onBlur={async (e) => {
-                          await fetch(`/api/admin/banners/${b.id}`, {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ ...b, title: e.target.value }),
-                          });
+                          if (browserOnlyMode) {
+                            localWebStore.updateBanner(b.id, { ...b, title: e.target.value });
+                          } else {
+                            await fetch(`/api/admin/banners/${b.id}`, {
+                              method: 'PUT',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ ...b, title: e.target.value }),
+                            });
+                          }
                           await refreshAll();
                           notify('Đã lưu tiêu đề banner.');
                         }}
@@ -846,11 +1106,18 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
                         type="text"
                         defaultValue={b.subtitle}
                         onBlur={async (e) => {
-                          await fetch(`/api/admin/banners/${b.id}`, {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ ...b, subtitle: e.target.value }),
-                          });
+                          if (browserOnlyMode) {
+                            localWebStore.updateBanner(b.id, {
+                              ...b,
+                              subtitle: e.target.value,
+                            });
+                          } else {
+                            await fetch(`/api/admin/banners/${b.id}`, {
+                              method: 'PUT',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ ...b, subtitle: e.target.value }),
+                            });
+                          }
                           await refreshAll();
                           notify('Đã lưu phụ đề banner.');
                         }}
@@ -865,6 +1132,18 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
                           onChange={async (e) => {
                             const files = e.target.files;
                             if (!files || files.length === 0) return;
+                            if (browserOnlyMode) {
+                              const urls = await filesToPersistedDataUrls(files);
+                              if (urls[0]) {
+                                localWebStore.updateBanner(b.id, {
+                                  ...b,
+                                  image_url: urls[0],
+                                });
+                                await refreshAll();
+                                notify('Đã cập nhật ảnh banner.');
+                              }
+                              return;
+                            }
                             const fd = new FormData();
                             fd.append('images', files[0]);
                             const up = await fetch('/api/admin/upload', {
@@ -901,16 +1180,25 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
                 onSubmit={async (e) => {
                   e.preventDefault();
                   if (!artTitle.trim()) return;
-                  await fetch('/api/admin/articles', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
+                  if (browserOnlyMode) {
+                    localWebStore.createArticle({
                       title: artTitle,
                       summary: artSummary,
                       content: artContent,
                       cover_image: artCover,
-                    }),
-                  });
+                    });
+                  } else {
+                    await fetch('/api/admin/articles', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        title: artTitle,
+                        summary: artSummary,
+                        content: artContent,
+                        cover_image: artCover,
+                      }),
+                    });
+                  }
                   setArtTitle('');
                   setArtSummary('');
                   setArtContent('');
@@ -978,9 +1266,13 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
                     <button
                       type="button"
                       onClick={async () => {
-                        await fetch(`/api/admin/articles/${a.id}`, {
-                          method: 'DELETE',
-                        });
+                        if (browserOnlyMode) {
+                          localWebStore.deleteArticle(a.id);
+                        } else {
+                          await fetch(`/api/admin/articles/${a.id}`, {
+                            method: 'DELETE',
+                          });
+                        }
                         await refreshAll();
                         notify('Đã xóa bài viết.');
                       }}
@@ -1012,11 +1304,18 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
                       type="text"
                       defaultValue={st.title}
                       onBlur={async (e) => {
-                        await fetch(`/api/admin/process/${st.id}`, {
-                          method: 'PUT',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ ...st, title: e.target.value }),
-                        });
+                        if (browserOnlyMode) {
+                          localWebStore.updateProcessStep(st.id, {
+                            ...st,
+                            title: e.target.value,
+                          });
+                        } else {
+                          await fetch(`/api/admin/process/${st.id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ ...st, title: e.target.value }),
+                          });
+                        }
                         await refreshAll();
                         notify('Đã cập nhật bước quy trình.');
                       }}
@@ -1026,11 +1325,18 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
                       rows={2}
                       defaultValue={st.description}
                       onBlur={async (e) => {
-                        await fetch(`/api/admin/process/${st.id}`, {
-                          method: 'PUT',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ ...st, description: e.target.value }),
-                        });
+                        if (browserOnlyMode) {
+                          localWebStore.updateProcessStep(st.id, {
+                            ...st,
+                            description: e.target.value,
+                          });
+                        } else {
+                          await fetch(`/api/admin/process/${st.id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ ...st, description: e.target.value }),
+                          });
+                        }
                         await refreshAll();
                         notify('Đã cập nhật mô tả quy trình.');
                       }}
@@ -1050,11 +1356,15 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
               <form
                 onSubmit={async (e) => {
                   e.preventDefault();
-                  await fetch('/api/admin/workshop', {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(workshop),
-                  });
+                  if (browserOnlyMode) {
+                    localWebStore.saveWorkshop(workshop);
+                  } else {
+                    await fetch('/api/admin/workshop', {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(workshop),
+                    });
+                  }
                   await refreshAll();
                   notify('Đã lưu thông tin Workshop.');
                 }}
@@ -1113,11 +1423,15 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
               <form
                 onSubmit={async (e) => {
                   e.preventDefault();
-                  await fetch('/api/admin/settings', {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(settings),
-                  });
+                  if (browserOnlyMode) {
+                    localWebStore.saveSettings(settings);
+                  } else {
+                    await fetch('/api/admin/settings', {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(settings),
+                    });
+                  }
                   await refreshAll();
                   notify('Đã cập nhật cài đặt website.');
                 }}
@@ -1195,6 +1509,17 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
                   e.preventDefault();
                   setPassMsg('');
                   setPassErr('');
+                  if (browserOnlyMode) {
+                    const res = changeLocalAdminPassword(currPass, newPass);
+                    if (!res.ok) {
+                      setPassErr(res.error || 'Đổi mật khẩu thất bại.');
+                      return;
+                    }
+                    setCurrPass('');
+                    setNewPass('');
+                    setPassMsg('Đã đổi mật khẩu thành công.');
+                    return;
+                  }
                   const res = await fetch('/api/admin/change-password', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1266,6 +1591,7 @@ export function AdminPage({ onNavigate, onPublicRefresh }: AdminPageProps) {
         <AdminProductModal
           product={editingProduct}
           categories={categories}
+          browserOnlyMode={browserOnlyMode}
           onClose={() => setEditingProduct(undefined)}
           onSaved={refreshAll}
         />
