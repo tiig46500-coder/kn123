@@ -1,0 +1,8 @@
+{
+  "name": "Remix Lạng Xanh – Khởi nguồn giá trị kinh tế xanh từ xơ mướp",
+  "description": "Website thương hiệu, giới thiệu dự án và trưng bày sản phẩm thủ công xanh từ xơ mướp tự nhiên của nhóm học sinh Trường THPT Dân tộc nội trú tỉnh Lạng Sơn.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
