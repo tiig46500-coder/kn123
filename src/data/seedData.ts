@@ -434,7 +434,7 @@ const RAW_SEED_PRODUCTS: RawSeedProduct[] = [
     display_order: 10,
     images: [
       {
-        url: '/images/products/tranh-hoa-dao-lang-son.jpg',
+        url: '/assets/aistudio/image_df5e262a.png',
         caption: 'Tranh hoa đào Lạng Sơn tạo hình nổi từ cánh xơ mướp và lá xơ',
         isCover: true,
       },
@@ -781,7 +781,7 @@ export const SEED_GALLERY: GalleryItem[] = [
     'Sản phẩm trang trí',
     'Tranh hoa đào Lạng Sơn',
     'Tác phẩm tranh nổi 3D ghép từ cánh hoa và lá xơ mướp nhuộm màu.',
-    '/images/products/tranh-hoa-dao-lang-son.jpg',
+    '/assets/aistudio/image_df5e262a.png',
   ],
   [
     'Sản phẩm trang trí',
@@ -1028,7 +1028,7 @@ export const SEED_WORKSHOP_INFO: WorkshopInfo = {
   gallery_images: [
     '/images/projects/tram-xanh-workshop.jpg',
     '/images/projects/nhom-hoc-sinh-lang-xanh.jpg',
-    '/images/products/tranh-hoa-dao-lang-son.jpg',
+    '/assets/aistudio/image_df5e262a.png',
     '/images/products/den-chop-chuon-chuon.jpg',
   ],
 };

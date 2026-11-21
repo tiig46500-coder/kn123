@@ -91,11 +91,21 @@ function buildInitialWebState(): StoredWebState {
 function readStoredState(): StoredWebState | null {
   const storage = getStorage();
   if (!storage) return null;
-  const raw = storage.getItem(WEB_STATE_KEY);
+  let raw = storage.getItem(WEB_STATE_KEY);
   if (!raw) return null;
   try {
+    let migrated = false;
+    if (raw.includes('/images/products/tranh-hoa-dao-lang-son.jpg')) {
+      raw = raw
+        .split('/images/products/tranh-hoa-dao-lang-son.jpg')
+        .join('/assets/aistudio/image_df5e262a.png');
+      migrated = true;
+    }
     const parsed = JSON.parse(raw) as StoredWebState;
     if (parsed && Array.isArray(parsed.products) && Array.isArray(parsed.categories)) {
+      if (migrated) {
+        writeStoredState(parsed);
+      }
       return parsed;
     }
   } catch {

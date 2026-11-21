@@ -144,7 +144,7 @@ export function AboutStoryPage({ settings, onNavigate }: AboutStoryPageProps) {
 
         <div className="lg:col-span-6 rounded-2xl overflow-hidden shadow-md aspect-[4/3]">
           <SafeImage
-            src="/images/products/tranh-hoa-dao-lang-son.jpg"
+            src="/assets/aistudio/image_df5e262a.png"
             alt="Tranh hoa đào Lạng Sơn bằng xơ mướp"
             className="w-full h-full object-cover"
           />

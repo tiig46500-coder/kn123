@@ -91,7 +91,10 @@ const JSON_STORE_PATH = path.join(DATA_DIR, 'langxanh-store.json');
 function normalizeLegacyJsonStore(raw: string): JsonStoreState | null {
   let updated = raw;
   let changed = false;
-  if (updated.includes('/assets/aistudio/')) {
+  if (
+    updated.includes('/assets/aistudio/') ||
+    updated.includes('/images/products/tranh-hoa-dao-lang-son.jpg')
+  ) {
     for (const [legacy, next] of Object.entries(LEGACY_IMAGE_MAP)) {
       if (updated.includes(legacy)) {
         updated = updated.split(legacy).join(next);

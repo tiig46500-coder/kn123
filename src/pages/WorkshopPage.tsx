@@ -78,7 +78,7 @@ export function WorkshopPage({ workshop, settings }: WorkshopPageProps) {
               : [
                   '/images/projects/tram-xanh-workshop.jpg',
                   '/images/projects/nhom-hoc-sinh-lang-xanh.jpg',
-                  '/images/products/tranh-hoa-dao-lang-son.jpg',
+                  '/assets/aistudio/image_df5e262a.png',
                   '/images/products/den-chop-chuon-chuon.jpg',
                 ]
             )

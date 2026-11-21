@@ -186,7 +186,7 @@ test('client seed bootstrap provides complete public fallback and excludes banne
     'IMG_2949',
     'IMG_2943',
     'tiktok-qr-lang-xanh',
-    'aistudio',
+    '/assets/aistudio/IMG_',
   ]) {
     assert.equal(
       serialized.includes(excluded),
@@ -196,7 +196,7 @@ test('client seed bootstrap provides complete public fallback and excludes banne
   }
 });
 
-test('all seed and component image references resolve to non-empty files inside public/images', () => {
+test('all seed and component image references resolve to non-empty files inside public', () => {
   const full = getFullSeedBootstrap();
   const urls = new Set<string>();
 
@@ -221,7 +221,10 @@ test('all seed and component image references resolve to non-empty files inside 
   assert.ok(urls.size >= 35, `Expected at least 35 image references, got ${urls.size}`);
 
   for (const url of urls) {
-    assert.ok(url.startsWith('/images/'), `Image URL must start with /images/: ${url}`);
+    assert.ok(
+      url.startsWith('/images/') || url === '/assets/aistudio/image_df5e262a.png',
+      `Unexpected image URL path: ${url}`,
+    );
     const fullPath = path.join(publicDir, url.slice(1));
     assert.ok(fs.existsSync(fullPath), `Missing image file on disk: ${fullPath}`);
     const stat = fs.statSync(fullPath);

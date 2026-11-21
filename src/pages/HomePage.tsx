@@ -50,7 +50,7 @@ const CORE_VALUES = [
     title: 'Kết nối cộng đồng',
     description:
       'Lan tỏa bản sắc Xứ Lạng qua hoa hồi, hoa đào và hoạt động trải nghiệm workshop cùng học sinh, gia đình.',
-    image: '/images/products/tranh-hoa-dao-lang-son.jpg',
+    image: '/assets/aistudio/image_df5e262a.png',
     icon: Users,
   },
 ];

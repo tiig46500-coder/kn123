@@ -52,7 +52,8 @@ export const LEGACY_IMAGE_MAP: Record<string, string> = {
   '/assets/aistudio/IMG_2935_a46de42d.JPG': '/images/products/den-cay-thong-xo-muop.jpg',
   '/assets/aistudio/IMG_2934_5384f946.JPG': '/images/products/den-ban-anh-sang-am.jpg',
   '/assets/aistudio/IMG_2902_30bb284e.JPG': '/images/products/bo-den-mini-that-no.jpg',
-  '/assets/aistudio/IMG_2867_03337256.JPG': '/images/products/tranh-hoa-dao-lang-son.jpg',
+  '/assets/aistudio/IMG_2867_03337256.JPG': '/assets/aistudio/image_df5e262a.png',
+  '/images/products/tranh-hoa-dao-lang-son.jpg': '/assets/aistudio/image_df5e262a.png',
   '/assets/aistudio/IMG_2897_9f966b31.JPG': '/images/products/bo-hoa-sen-xo-muop.jpg',
   '/assets/aistudio/IMG_2898_f42f6d60.JPG': '/images/products/bo-hoa-vang-kem.jpg',
   '/assets/aistudio/IMG_2899_dccf280d.JPG': '/images/products/bo-hoa-hong-trang-kem.jpg',
@@ -425,7 +426,11 @@ function migrateLegacyImagePaths(db: DatabaseType.Database) {
       .prepare('SELECT value FROM site_settings WHERE key = ?')
       .get('workshop_info') as { value: string } | undefined;
 
-    if (workshopRow?.value && workshopRow.value.includes('/assets/aistudio/')) {
+    if (
+      workshopRow?.value &&
+      (workshopRow.value.includes('/assets/aistudio/') ||
+        workshopRow.value.includes('/images/products/tranh-hoa-dao-lang-son.jpg'))
+    ) {
       let updatedJson = workshopRow.value;
       for (const [legacy, next] of Object.entries(LEGACY_IMAGE_MAP)) {
         updatedJson = updatedJson.split(legacy).join(next);
